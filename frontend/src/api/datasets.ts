@@ -1,1 +1,1 @@
-import {request} from "./client";export const fetchDatasets=()=>request("/datasets");export const createDatasets=(value:unknown)=>request("/datasets","POST",value);
+import {request} from "./client";export const fetchDatasets=()=>request("/datasets");export const createDatasets=(value:unknown)=>request("/datasets","POST",value);export const backfillDataset=(id:string,value:unknown)=>request(`/datasets/${id}/backfill`,"POST",value);

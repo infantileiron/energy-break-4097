@@ -4,7 +4,8 @@ from sqlalchemy import select,func
 from src.config.database import initialize,Session
 from src.models import MeterDataset,OperatingWindow,ChangeStudy,ChangeRun,IncidentReview,Report,User
 from src.utils.security import hash_password
-from src.services.run_service import compute
+from src.services.run_service import compute,snapshot_of
+from src.services.backfill import FIELDS
 
 def make_readings():
  rng=random.Random(20261112);rows=[]
@@ -25,12 +26,15 @@ def seed():
   for role in ["admin","analyst","viewer"]:
    email=role+"@energy.demo"
    if not db.scalar(select(User).where(User.email==email)):db.add(User(id="user-"+role,email=email,role=role,password_hash=hash_password("KilnDemo2026!")))
-  if not db.get(MeterDataset,"demo-dataset"):db.add(MeterDataset(id="demo-dataset",name="青屿一号窑 2026年10月",readings=make_readings(),description="720条小时电量/产量，包含停机、零产量和缺测样例"))
+  if not db.get(MeterDataset,"demo-dataset"):
+   readings=make_readings()
+   db.add(MeterDataset(id="demo-dataset",name="青屿一号窑 2026年10月",readings=readings,versions={r["timestamp"]:{f:0 for f in FIELDS} for r in readings},description="720条小时电量/产量，包含停机、零产量和缺测样例"))
   if not db.get(OperatingWindow,"demo-window"):db.add(OperatingWindow(id="demo-window",name="十月全月工况",start_at="2026-10-01T00:00:00+00:00",end_at="2026-10-30T23:00:00+00:00",note="含停机观测，计算时单独隔离；最小段长以有效观测数计"))
   db.commit()
   if not db.get(ChangeStudy,"demo-study"):db.add(ChangeStudy(id="demo-study",name="一号窑换料工况复核",dataset_id="demo-dataset",window_id="demo-window",config={"penalty":6.,"min_segment":24,"anomaly_threshold":3.5,"noise_floor":.02}))
   db.commit()
-  if not db.get(ChangeRun,"demo-run"):db.add(ChangeRun(id="demo-run",study_id="demo-study",status="queued",result={},error=""));db.commit();compute(db,"demo-run")
+  if not db.get(ChangeRun,"demo-run"):
+   db.add(ChangeRun(id="demo-run",study_id="demo-study",status="queued",result={},snapshot=snapshot_of(db.get(MeterDataset,"demo-dataset"),db.get(OperatingWindow,"demo-window")),error=""));db.commit();compute(db,"demo-run")
   if not db.get(IncidentReview,"demo-review"):db.add(IncidentReview(id="demo-review",run_id="demo-run",action="核对10月11日与21日换料记录，单独复查三个尖峰时段的计量和批次，暂不认定为设备故障。",state="approved",reviewer="admin@energy.demo"))
   db.commit()
   if not db.get(Report,"demo-report"):db.add(Report(id="demo-report",review_id="demo-review",title="一号窑十月能耗复核底稿",snapshot={"result":db.get(ChangeRun,"demo-run").result,"action":db.get(IncidentReview,"demo-review").action,"reviewer":"admin@energy.demo"}))

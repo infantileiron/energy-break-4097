@@ -1,7 +1,7 @@
 from fastapi import APIRouter,Depends
 from ..config.database import get_db
 from ..utils.auth import current,write_user,admin
-from ..schemas.dataset import DatasetCreate
+from ..schemas.dataset import DatasetCreate,DatasetBackfill
 from ..controllers import dataset_controller as controller,common
 from ..models.dataset import MeterDataset
 from ..models.common import serialize
@@ -12,6 +12,8 @@ def listing(db=Depends(get_db),user=Depends(current)):return controller.list_all
 def detail(ident:str,db=Depends(get_db),user=Depends(current)):return controller.detail(db,ident)
 @router.post("",status_code=201)
 def create(body:DatasetCreate,db=Depends(get_db),user=Depends(write_user)):return controller.create(db,body)
+@router.post("/{ident}/backfill")
+def backfill(ident:str,body:DatasetBackfill,db=Depends(get_db),user=Depends(write_user)):return controller.backfill(db,ident,body)
 from ..schemas.dataset import DatasetEdit
 @router.patch("/{ident}")
 def edit(ident:str,body:DatasetEdit,db=Depends(get_db),user=Depends(write_user)):

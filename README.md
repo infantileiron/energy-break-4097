@@ -32,7 +32,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 | 网关 | Nginx1.28，SPA回落与API代理 |
 
 - `backend/src/models,schemas,services,controllers,routes`：按六业务实体分层。
-- `services/readings.py`：导入与归一；`change_points.py`：DP；`robust_scores.py`：分段残差MAD评分。
+- `services/readings.py`：导入与归一；`services/backfill.py`：补传解析与逐项版本合并；`change_points.py`：DP；`robust_scores.py`：分段残差MAD评分。
 - `backend/src/config,utils,middlewares`：配置、数据库、JWT/口令摘要、队列、审计、全局错误。
 - `backend/scripts/seed_demo.py`：自然键种子；`migrations/001_schema.sql`：新库基线说明，启动以元数据建表。
 - `frontend/src/api,stores,types,pages,router`：实体端到端入口；`components`的EnergyTrace与SegmentTable被总览、结果、报告共用；`hooks`提供任务状态和轮询。
@@ -76,6 +76,20 @@ DP在所有满足最小段长的分割中求解：
 
 变点表示分段均值变化，不自动证明换料造成变化；异常分数也不是故障概率。低惩罚可能把尖峰分成独立工况；最小段长与复核日志帮助约束这种误读。
 
+## 批次补传与运行快照
+
+电量与产量常分系统、分时刻补传，整行覆盖会丢掉另一项。`POST /datasets/{id}/backfill` 接受 `{source_version, csv_text}`，CSV 含 `timestamp` 与 `kwh,output_kg,status` 的任意子集列，按统一UTC时刻与**逐项来源版本**合并，不整行覆盖：
+
+- 空单元格表示该项未提供，保留原值；显式 `null` 记为缺测（status 不可为 null）。
+- 更高版本覆盖；更低版本与同版本同值忽略，重复补传与失败后的原样重试都不改动结果。
+- 同版本异值视为来源口径冲突：整批 409 拒绝并回滚，不留下部分更新；响应列出每处冲突的时刻、字段、现有值与补传值，提高版本后重试可覆盖。
+- 新时刻未提供的项记缺测，状态默认 running；初始导入各项版本为 0，补传版本须 ≥1。
+- 同一批次的并发补传由进程内锁与 `SELECT ... FOR UPDATE` 串行化，合并后各项保留最高版本值。
+
+回执含接收行数、写入/忽略/新增项数与逐条原因，导入页可核对；冲突明细在导入页同处展示。`datasets.versions` 记录每个时刻各项的来源版本。
+
+运行在**创建时**把观测、批次名与窗口口径快照进 `runs.snapshot`，worker 只读快照计算：补传不影响已排队与已完成结果，新建运行才看到新数据。存量库由 `migrations/002_backfill.sql` 与启动加列守卫幂等补齐 `datasets.versions` 与 `runs.snapshot` 两列。
+
 ## 一天的工艺复核
 
 1. 09:00 分析师打开 `qingyu_kiln1_202610.csv`，核查720条小时记录、单位与时区。
@@ -92,7 +106,7 @@ DP在所有满足最小段长的分割中求解：
 ## 已知差异
 
 - Redis列表取走任务后worker崩溃不会自动重投；可建立新运行重试，未实现租约与取消。
-- 新库自动建表；存量库没有版本化升级/回滚工具。列表最多200条实体，尚无服务器分页。
+- 新库自动建表；002两列加列由启动守卫幂等套用，此外存量库没有版本化升级/回滚工具。列表最多200条实体，尚无服务器分页。
 - 仅有限CSV导入，不接真实设备或自动校验电量/产量计量周期是否一致；由使用者复核口径。
 - 控制图展示与诊断为模拟教学，不是设备安全监测。Google Fonts需联网，断网回退字体。
 

@@ -7,4 +7,5 @@ class ChangeRun(RecordMixin,Base):
  study_id:Mapped[str]=mapped_column(ForeignKey("studies.id"))
  status:Mapped[str]=mapped_column(String(20),default="queued")
  result:Mapped[dict]=mapped_column(JSON,default=dict)
+ snapshot:Mapped[dict]=mapped_column(JSON,nullable=True)
  error:Mapped[str]=mapped_column(Text,default="")
